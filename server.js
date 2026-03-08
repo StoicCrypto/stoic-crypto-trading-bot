@@ -1,5 +1,6 @@
 const express = require('express');
 const https = require('https');
+const http = require('http');
 
 const app = express();
 app.use(express.json());
@@ -8,7 +9,36 @@ app.use((req, res, next) => {
   next();
 });
 
-// ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ Symbol configuration ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ
+function httpsPost(hostname, path, headers, body) {
+  return new Promise((resolve, reject) => {
+    const req = https.request({ hostname, path, method: 'POST', headers }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); }
+        catch(e) { reject(e); }
+      });
+    });
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+function httpsGet(hostname, path) {
+  return new Promise((resolve, reject) => {
+    https.get({ hostname, path }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); }
+        catch(e) { reject(e); }
+      });
+    }).on('error', reject);
+  });
+}
+
+// Symbol configuration
 // qty = 100 / currentPrice, rounded to the step for each symbol
 const SYMBOL_CONFIG = {
   BTCUSDT:  { category: 'linear', decimals: 3 },  // step 0.001
@@ -18,31 +48,20 @@ const SYMBOL_CONFIG = {
   NEXOUSDT: { category: 'spot',   decimals: 0, minQty: 1 }, // step 1, min 1
 };
 
-// ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ Fetch live price from Bybit demo public ticker ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ
+// Fetch live price from Bybit demo public ticker
 async function getLivePrice(symbol, category) {
-  return new Promise((resolve, reject) => {
-    const url = `https://api-demo.bybit.com/v5/market/tickers?category=${category}&symbol=${symbol}`;
-    https.get(url, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        try {
-          const parsed = JSON.parse(data);
-          if (parsed.retCode !== 0) {
-            return reject(new Error(`Ticker error for ${symbol}: ${parsed.retMsg}`));
-          }
-          const price = parseFloat(parsed.result.list[0].lastPrice);
-          if (!price || price <= 0) return reject(new Error(`Invalid price for ${symbol}: ${price}`));
-          resolve(price);
-        } catch (e) {
-          reject(new Error(`Failed to parse ticker for ${symbol}: ${e.message}`));
-        }
-      });
-    }).on('error', reject);
-  });
+  const hostname = 'api-demo.bybit.com';
+  const path = `/v5/market/tickers?category=${category}&symbol=${symbol}`;
+  const parsed = await httpsGet(hostname, path);
+  if (parsed.retCode !== 0) {
+    throw new Error(`Ticker error for ${symbol}: ${parsed.retMsg}`);
+  }
+  const price = parseFloat(parsed.result.list[0].lastPrice);
+  if (!price || price <= 0) throw new Error(`Invalid price for ${symbol}: ${price}`);
+  return price;
 }
 
-// ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ Calculate quantity ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ
+// Calculate quantity
 function calcQty(price, decimals, minQty = 0) {
   const raw = 100 / price;
   let qty = parseFloat(raw.toFixed(decimals));
@@ -50,86 +69,61 @@ function calcQty(price, decimals, minQty = 0) {
   return qty;
 }
 
-// ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ Place order on Bybit demo ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ
+// Place order on Bybit demo
 async function placeBybitOrder(apiKey, apiSecret, orderParams) {
-  return new Promise((resolve, reject) => {
-    const timestamp = Date.now().toString();
-    const recvWindow = '5000';
+  const timestamp = Date.now().toString();
+  const recvWindow = '5000';
 
-    const body = JSON.stringify(orderParams);
+  const body = JSON.stringify(orderParams);
 
-    // HMAC-SHA256 signature: timestamp + apiKey + recvWindow + body
-    const crypto = require('crypto');
-    const preSign = timestamp + apiKey + recvWindow + body;
-    const signature = crypto.createHmac('sha256', apiSecret).update(preSign).digest('hex');
+  const crypto = require('crypto');
+  const preSign = timestamp + apiKey + recvWindow + body;
+  const signature = crypto.createHmac('sha256', apiSecret).update(preSign).digest('hex');
 
-    const options = {
-      hostname: 'api-demo.bybit.com',
-      path: '/v5/order/create',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-BAPI-API-KEY': apiKey,
-        'X-BAPI-SIGN': signature,
-        'X-BAPI-SIGN-METHOD': 'HmacSHA256',
-        'X-BAPI-TIMESTAMP': timestamp,
-        'X-BAPI-RECV-WINDOW': recvWindow,
-        'Content-Length': Buffer.byteLength(body),
-      },
-    };
+  const headers = {
+    'Content-Type': 'application/json',
+    'X-BAPI-API-KEY': apiKey,
+    'X-BAPI-SIGN': signature,
+    'X-BAPI-SIGN-METHOD': 'HmacSHA256',
+    'X-BAPI-TIMESTAMP': timestamp,
+    'X-BAPI-RECV-WINDOW': recvWindow,
+    'Content-Length': Buffer.byteLength(body),
+  };
 
-    const req = https.request(options, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        try {
-          const parsed = JSON.parse(data);
-          resolve(parsed);
-        } catch (e) {
-          reject(new Error(`Failed to parse order response: ${e.message}`));
-        }
-      });
-    });
-
-    req.on('error', reject);
-    req.write(body);
-    req.end();
-  });
+  return await httpsPost('api-demo.bybit.com', '/v5/order/create', headers, body);
 }
 
-// ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ Health check ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ
+// Health check
 app.get('/', (req, res) => res.send('Stoic Crypto Bot Active'));
 
-// ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ Webhook endpoint ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ
+// Webhook endpoint
 app.post('/webhook', async (req, res) => {
-  console.log('=== WEBHOOK HIT ===', new Date().toISOString());
-  console.log('Body:', JSON.stringify(req.body));
-  console.log('=== WEBHOOK RECEIVED ===', JSON.stringify(req.body));
-
-  const apiKey    = process.env.BYBIT_API_KEY;
-  const apiSecret = process.env.BYBIT_API_SECRET;
-
-  if (!apiKey || !apiSecret) {
-    console.error('Missing BYBIT_API_KEY or BYBIT_API_SECRET env vars');
-    return res.status(500).json({ error: 'Missing API credentials' });
-  }
-
-  // Payload from TradingView alert (or similar)
-  // Expected fields: symbol, side, action ('open' or 'close'), positionIdx (optional)
-  const { symbol, side, action, positionIdx } = req.body;
-
-  if (!symbol || !side || !action) {
-    console.error('Missing required fields: symbol, side, action');
-    return res.status(400).json({ error: 'Missing required fields: symbol, side, action' });
-  }
-
-  const config = SYMBOL_CONFIG[symbol];
-  if (!config) {
-    console.error(`Unknown symbol: ${symbol}`);
-    return res.status(400).json({ error: `Unknown symbol: ${symbol}` });
-  }
-
   try {
+    console.log('=== WEBHOOK HIT ===', new Date().toISOString());
+    console.log('Body:', JSON.stringify(req.body));
+    console.log('=== WEBHOOK RECEIVED ===', JSON.stringify(req.body));
+
+    const apiKey    = process.env.BYBIT_API_KEY;
+    const apiSecret = process.env.BYBIT_API_SECRET;
+
+    if (!apiKey || !apiSecret) {
+      console.error('Missing BYBIT_API_KEY or BYBIT_API_SECRET env vars');
+      return res.status(500).json({ error: 'Missing API credentials' });
+    }
+
+    const { symbol, side, action, positionIdx } = req.body;
+
+    if (!symbol || !side || !action) {
+      console.error('Missing required fields: symbol, side, action');
+      return res.status(400).json({ error: 'Missing required fields: symbol, side, action' });
+    }
+
+    const config = SYMBOL_CONFIG[symbol];
+    if (!config) {
+      console.error(`Unknown symbol: ${symbol}`);
+      return res.status(400).json({ error: `Unknown symbol: ${symbol}` });
+    }
+
     // 1. Fetch live price
     console.log(`Fetching live price for ${symbol} (${config.category})...`);
     const price = await getLivePrice(symbol, config.category);
@@ -143,9 +137,7 @@ app.post('/webhook', async (req, res) => {
     let orderParams;
 
     if (config.category === 'spot') {
-      // SPOT orders (NEXOUSDT)
       if (action === 'open') {
-        // Regular Buy to open long
         orderParams = {
           category: 'spot',
           symbol: symbol,
@@ -154,7 +146,6 @@ app.post('/webhook', async (req, res) => {
           qty: qty.toString(),
         };
       } else if (action === 'close') {
-        // Regular Sell to close long (no reduceOnly on spot)
         orderParams = {
           category: 'spot',
           symbol: symbol,
@@ -166,18 +157,16 @@ app.post('/webhook', async (req, res) => {
         return res.status(400).json({ error: `Unknown action: ${action}` });
       }
     } else {
-      // LINEAR (perpetual futures) orders
       if (action === 'open') {
         orderParams = {
           category: 'linear',
           symbol: symbol,
-          side: side,           // 'Buy' or 'Sell'
+          side: side,
           orderType: 'Market',
           qty: qty.toString(),
           positionIdx: positionIdx !== undefined ? positionIdx : 0,
         };
       } else if (action === 'close') {
-        // Reverse side to close: if opened Buy, close with Sell; and vice versa
         const closeSide = side === 'Buy' ? 'Sell' : 'Buy';
         orderParams = {
           category: 'linear',
@@ -213,20 +202,20 @@ app.post('/webhook', async (req, res) => {
       console.error(`Order FAILED for ${symbol}: retCode=${result.retCode} retMsg=${result.retMsg}`);
       return res.status(502).json({ success: false, symbol, retCode: result.retCode, retMsg: result.retMsg, result: result.result });
     }
-
   } catch (err) {
-    console.error(`Error processing ${symbol}: ${err.message}`, err.stack);
+    console.error(`Error processing webhook: ${err.message}`, err.stack);
     return res.status(500).json({ error: err.message });
   }
 });
 
-// ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ Start server ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ
+// Start server
 const PORT = process.env.PORT || 3000;
 // Keep-alive ping every 4 minutes to prevent Railway from sleeping
 setInterval(() => {
-  fetch(`http://localhost:${PORT}/`)
-    .then(() => console.log('Keep-alive ping sent'))
-    .catch(err => console.error('Keep-alive error:', err.message));
+  http.get(`http://localhost:${PORT}/`, (res) => {
+    res.resume();
+    console.log('Keep-alive ping sent');
+  }).on('error', err => console.error('Keep-alive error:', err.message));
 }, 4 * 60 * 1000);
 console.log('Keep-alive interval started');
 
